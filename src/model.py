@@ -10,7 +10,7 @@ class Span(BaseModel):
 
 class Vulnerability(BaseModel):
     code: str
-    cwe: List[str]
+    cwe: str
     span: Span
     falsePositive: bool
     language: str
