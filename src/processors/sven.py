@@ -134,7 +134,24 @@ class Sven:
                 falsePositive=False,
                 language=language
             )
+
+            code = row["func_src_after"]
+            added_lines = row["line_changes"]["added"]
+            if len(added_lines) == 1:
+                span = Span(start=added_lines[0]["line_no"], end=added_lines[0]["line_no"])
+            else:
+                span = Span(start=added_lines[0]["line_no"], end=added_lines[-1]["line_no"])
+
+            false_vuln = Vulnerability(
+                code=code,
+                cwe=cwe,
+                span=span,
+                falsePositive=True,
+                language=language
+            )
+
             self.vulnerabilities.append(vuln)
+            self.vulnerabilities.append(false_vuln)
         
 
     def get_vulnerabilities(self):
@@ -148,7 +165,7 @@ class Sven:
 
 # Example usage:
 if __name__ == "__main__":
-    processor = SvenProcessor(dataset_split='train')
+    processor = Sven(dataset_split='train')
     processor.process_dataset()
     processed_vulns = processor.get_vulnerabilities()
     

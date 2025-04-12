@@ -152,7 +152,19 @@ class CleanVul:
                 vuln.cwe = cwe
                 vuln.span = Span(start=start_line, end=end_line)
 
+                #Note: Potentially not the most accurate way to designate span since you may not always be adding 1-1 lines for fixes 
+                false_vuln = Vulnerability(
+                    code=row_dict["func_after"],
+                    cwe=cwe,
+                    span = Span(start=start_line, end=end_line),
+                    falsePositive=True,
+                    language=row_dict["extension"],
+                )
+
+                print(false_vuln)
+
                 local_vulnerabilities.append(vuln)
+                local_vulnerabilities.append(false_vuln)
             except Exception as e:
                 print(f"Error processing row {index} in file '{path}': {e}")
                 # Optional: add logging or further error handling here.
