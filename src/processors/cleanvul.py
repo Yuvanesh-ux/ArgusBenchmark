@@ -41,8 +41,11 @@ class CleanVul:
     """
     A processor for analyzing code snippets for vulnerabilities using an external API.
     
-    This class scans a given folder for CSV files, sends each vulnerability snippet to an API,
-    parses the response, and aggregates the results.
+    This class:
+    1. Scans a given folder for CSV files.
+    2. Iterates over each row to extract vulnerability metadata (code snippet, CWE identifier, vulnerable spans, programming language).
+    3. Uses an external API to determine the CWE and vulnerable lines.
+    4. Creates and stores both the primary and false-positive Vulnerability objects.
     """
 
     def __init__(self, api_key: str = None, prompt: str = None, data_folder: str = "src/data/raw/CleanVul/"):
@@ -58,11 +61,9 @@ class CleanVul:
                 Defaults to "src/data/raw/CleanVul/".
         """
         load_dotenv()  # Load environment variables
-
         self.api_key = api_key or os.environ.get("ANTHROPIC_KEY")
         if not self.api_key:
             raise EnvironmentError("ANTHROPIC_KEY not found in environment variables")
-
         self.client = anthropic.Anthropic(api_key=self.api_key)
         self.prompt = prompt or DEFAULT_PROMPT
         self.data_folder = data_folder
@@ -71,14 +72,14 @@ class CleanVul:
 
     def _get_file_paths(self):
         """
-        Scans the data folder and returns a list of CSV file paths.
+        Scan the data folder and return a list of CSV file paths.
 
         Returns:
-            list: List of full file paths for CSV files in the data folder.
+            list: List of full CSV file paths from the specified data folder.
         """
         if not os.path.isdir(self.data_folder):
             raise FileNotFoundError(f"Directory '{self.data_folder}' does not exist.")
-
+        
         paths = []
         for filename in os.listdir(self.data_folder):
             if filename.endswith(".csv"):
@@ -86,15 +87,20 @@ class CleanVul:
                 paths.append(full_path)
         return paths
 
-    def parse_api_response(self, response_text: str):
+    def parse_span_response(self, response_text: str):
         """
-        Parse the API response text to extract the single CWE identifier, start line, and end line.
+        Parse the API response text to extract the CWE identifier, start line, and end line.
+
+        The response is expected to follow the format:
+            CWE: <CWE_IDENTIFIER>
+            start: <NUMBER>
+            end: <NUMBER>
 
         Args:
             response_text (str): Raw response text from the API.
 
         Returns:
-            tuple: (cwe (str), start (int), end (int))
+            tuple: A tuple (cwe (str), start (int), end (int)).
         """
         cwe, start, end = None, None, None
         lines = response_text.strip().split('\n')
@@ -113,11 +119,8 @@ class CleanVul:
         
         For each row in the CSV, this method:
           - Reads the vulnerability information.
-          - Sends the code snippet to the API.
-          - Parses the response to extract the vulnerable line numbers and CWE identifier.
-          - Creates a Vulnerability object and appends it to the processor's list.
-
-        Note: The current logic processes only the first row of each file.
+          - Calls the API to retrieve the CWE identifier and vulnerable line numbers.
+          - Creates a primary Vulnerability object (normal vulnerability) and a false-positive object in separate try/except blocks.
 
         Args:
             path (str): File path to the CSV file.
@@ -129,53 +132,58 @@ class CleanVul:
         local_vulnerabilities = []
 
         for index, row in tqdm(df.iterrows(), total=len(df), desc=f"Processing {path}"):
-            try:
-                row_dict = row.to_dict()
-                vuln = Vulnerability(
-                    code=row_dict["func_before"],
-                    cwe="",  # Initialize as an empty string
-                    span=Span(start=0, end=int(1e9)),
-                    falsePositive=False,
-                    language=row_dict["extension"],
-                )
+            row_dict = row.to_dict()
 
+            # Attempt the API call and response parsing (common for both vulnerabilities)
+            try:
                 response = self.client.messages.create(
                     model="claude-3-7-sonnet-20250219",
                     system=self.prompt,
-                    messages=[{"role": "user", "content": vuln.code}],
+                    messages=[{"role": "user", "content": row_dict["func_before"]}],
                     max_tokens=256,
                     temperature=0,
                 )
                 response_text = response.content[0].text
+                cwe, start_line, end_line = self.parse_span_response(response_text)
+            except Exception as e:
+                print(f"Error during API call/response parsing for row {index} in file '{path}': {e}")
+                continue
 
-                cwe, start_line, end_line = self.parse_api_response(response_text)
-                vuln.cwe = cwe
-                vuln.span = Span(start=start_line, end=end_line)
+            try:
+                vuln = Vulnerability(
+                    code=row_dict["func_before"],
+                    cwe=cwe,
+                    span=Span(start=start_line, end=end_line),
+                    falsePositive=False,
+                    language=row_dict["extension"],
+                )
+                self.vulnerabilities.append(vuln)
+            except Exception as e:
+                print(f"Error processing normal vulnerability in row {index} in file '{path}': {e}")
 
-                #Note: Potentially not the most accurate way to designate span since you may not always be adding 1-1 lines for fixes 
+            try:
                 false_vuln = Vulnerability(
                     code=row_dict["func_after"],
                     cwe=cwe,
-                    span = Span(start=start_line, end=end_line),
+                    span=Span(start=start_line, end=end_line),
                     falsePositive=True,
                     language=row_dict["extension"],
                 )
-
-                print(false_vuln)
-
-                local_vulnerabilities.append(vuln)
-                local_vulnerabilities.append(false_vuln)
+                self.vulnerabilities.append(false_vuln)
             except Exception as e:
-                print(f"Error processing row {index} in file '{path}': {e}")
-                # Optional: add logging or further error handling here.
+                print(f"Error processing false vulnerability in row {index} in file '{path}': {e}")
 
         print(f"Successfully loaded {len(local_vulnerabilities)} vulnerabilities from '{path}'.")
         self.vulnerabilities.extend(local_vulnerabilities)
-        return local_vulnerabilities
 
-    def process_all_files(self):
+    def process_dataset(self):
         """
-        Process all CSV files found in the data folder.
+        Process the entire dataset by iterating through all CSV files in the data folder.
+
+        For each CSV file:
+          - Reads the file.
+          - Processes each vulnerability snippet.
+          - Aggregates both the primary and false-positive Vulnerability objects.
         """
         for path in self.file_paths:
             self.process_file(path)
@@ -183,19 +191,17 @@ class CleanVul:
     def get_vulnerabilities(self):
         """
         Retrieve all processed vulnerabilities.
-
+        
         Returns:
             list: Aggregated list of Vulnerability objects.
         """
         return self.vulnerabilities
 
 
-# Example usage:
 if __name__ == "__main__":
     clean_vul_processor = CleanVul()
-
-    clean_vul_processor.process_all_files()
-
+    clean_vul_processor.process_dataset()
     processed_vulns = clean_vul_processor.get_vulnerabilities()
-    print("Processed Vulnerabilities:")
-    print(processed_vulns)
+    
+    # print("Processed Vulnerabilities:")
+    # print(processed_vulns)
