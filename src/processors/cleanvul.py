@@ -134,7 +134,6 @@ class CleanVul:
         for index, row in tqdm(df.iterrows(), total=len(df), desc=f"Processing {path}"):
             row_dict = row.to_dict()
 
-            # Attempt the API call and response parsing (common for both vulnerabilities)
             try:
                 response = self.client.messages.create(
                     model="claude-3-7-sonnet-20250219",
