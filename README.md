@@ -1,4 +1,4 @@
-# Argus Benchmark
+# [Argus](https://en.wikipedia.org/wiki/Argus_Panoptes) Benchmark
 
 A (potential) in-house benchmark to asses the strength of LLMs on detecting software vulnerabilities. 
 
