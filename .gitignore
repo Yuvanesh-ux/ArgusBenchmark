@@ -11,6 +11,3 @@ wheels/
 
 #env
 src/.env
-
-#data
-src/data
