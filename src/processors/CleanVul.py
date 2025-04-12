@@ -12,16 +12,16 @@ You are a security code analysis expert. You have one and only one task:
     Process:
         Read and interpret the code snippet.
         Identify the specific lines of code that cause the vulnerability.
-        Determine the most appropriate CWE (Common Weakness Enumeration) identifier(s) for the vulnerability.
+        Determine the most appropriate CWE (Common Weakness Enumeration) identifier for the vulnerability.
 
     Output: Provide the following fields only and nothing else, so that it can be automatically parsed and saved in a database:
-        An array of CWE identifiers (e.g., ["CWE-79"] or ["CWE-79","CWE-89"])
+        A CWE identifier (e.g., "CWE-79")
         The start line (the first line of the vulnerable code)
         The end line (the last line of the vulnerable code)
 
 Format your answer exactly as:
 
-CWEs: [<CWE_IDENTIFIER_1>, <CWE_IDENTIFIER_2>, ...]
+CWE: <CWE_IDENTIFIER>
 start: <NUMBER>
 end: <NUMBER>
 
@@ -30,7 +30,7 @@ No additional commentary, no explanation, and no extraneous text.
 Remember:
 
     You must identify the vulnerable lines precisely.
-    You must select the correct CWE(s) that most accurately describe the vulnerability.
+    You must select the correct CWE that most accurately describes the vulnerability.
     Do not include any text other than the three lines specified above in the exact format shown.
 
 Failure to comply with these rules will cause your output to be parsed incorrectly, so ensure absolute adherence.
@@ -45,9 +45,9 @@ class CleanVul:
     parses the response, and aggregates the results.
     """
 
-    def __init__(self, api_key: str = None, prompt: str = None, data_folder: str = "src/data/CleanVul/"):
+    def __init__(self, api_key: str = None, prompt: str = None, data_folder: str = "src/data/raw/CleanVul/"):
         """
-        Initialize the VulnerabilityProcessor.
+        Initialize the processor.
 
         Args:
             api_key (str, optional): Anthropics API key. If not provided, it is read
@@ -55,7 +55,7 @@ class CleanVul:
             prompt (str, optional): The prompt that will be sent to the API. If not provided,
                 the DEFAULT_PROMPT is used.
             data_folder (str, optional): Folder containing CSV files with vulnerability data.
-                Defaults to "data/CleanVul".
+                Defaults to "src/data/raw/CleanVul/".
         """
         load_dotenv()  # Load environment variables
 
@@ -88,26 +88,24 @@ class CleanVul:
 
     def parse_api_response(self, response_text: str):
         """
-        Parse the API response text to extract CWEs, start line, and end line.
+        Parse the API response text to extract the single CWE identifier, start line, and end line.
 
         Args:
             response_text (str): Raw response text from the API.
 
         Returns:
-            tuple: (cwes (list of str), start (int), end (int))
+            tuple: (cwe (str), start (int), end (int))
         """
-        cwes, start, end = None, None, None
+        cwe, start, end = None, None, None
         lines = response_text.strip().split('\n')
         for line in lines:
-            if line.startswith("CWEs:"):
-                # Extract the string inside the brackets and parse into a list.
-                cwes_str = line.split(":", 1)[1].strip()
-                cwes = [cwe.strip().replace('"', '') for cwe in cwes_str[1:-1].split(',')]
+            if line.startswith("CWE:"):
+                cwe = line.split(":", 1)[1].strip()
             elif line.startswith("start:"):
                 start = int(line.split(":", 1)[1].strip())
             elif line.startswith("end:"):
                 end = int(line.split(":", 1)[1].strip())
-        return cwes, start, end
+        return cwe, start, end
 
     def process_file(self, path: str):
         """
@@ -116,7 +114,7 @@ class CleanVul:
         For each row in the CSV, this method:
           - Reads the vulnerability information.
           - Sends the code snippet to the API.
-          - Parses the response to extract vulnerable line numbers and CWE identifiers.
+          - Parses the response to extract the vulnerable line numbers and CWE identifier.
           - Creates a Vulnerability object and appends it to the processor's list.
 
         Note: The current logic processes only the first row of each file.
@@ -135,7 +133,7 @@ class CleanVul:
                 row_dict = row.to_dict()
                 vuln = Vulnerability(
                     code=row_dict["func_before"],
-                    cwe=[""],
+                    cwe="",  # Initialize as an empty string
                     span=Span(start=0, end=int(1e9)),
                     falsePositive=False,
                     language=row_dict["extension"],
@@ -150,15 +148,14 @@ class CleanVul:
                 )
                 response_text = response.content[0].text
 
-                cwes, start_line, end_line = self.parse_api_response(response_text)
-                vuln.cwe = cwes
+                cwe, start_line, end_line = self.parse_api_response(response_text)
+                vuln.cwe = cwe
                 vuln.span = Span(start=start_line, end=end_line)
 
                 local_vulnerabilities.append(vuln)
             except Exception as e:
                 print(f"Error processing row {index} in file '{path}': {e}")
                 # Optional: add logging or further error handling here.
-
 
         print(f"Successfully loaded {len(local_vulnerabilities)} vulnerabilities from '{path}'.")
         self.vulnerabilities.extend(local_vulnerabilities)
@@ -183,13 +180,10 @@ class CleanVul:
 
 # Example usage:
 if __name__ == "__main__":
-    # Instantiate the processor with the data folder that contains your CSV files.
-    CleanVul = CleanVul()
-    
-    # Process all CSV files in the folder.
-    CleanVul.process_all_files()
-    
-    # Retrieve and print all processed vulnerabilities.
-    processed_vulns = CleanVul.get_vulnerabilities()
+    clean_vul_processor = CleanVul()
+
+    clean_vul_processor.process_all_files()
+
+    processed_vulns = clean_vul_processor.get_vulnerabilities()
     print("Processed Vulnerabilities:")
     print(processed_vulns)

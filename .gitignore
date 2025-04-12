@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+#env
+src/.env
+
 #data
 src/data
