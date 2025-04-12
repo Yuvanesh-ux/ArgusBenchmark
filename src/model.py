@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import List
-from typing import Literal
 
 
 class Span(BaseModel):

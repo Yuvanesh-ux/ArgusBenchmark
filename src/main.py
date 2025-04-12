@@ -20,10 +20,7 @@ def save_vulnerabilities_to_jsonl(vulnerabilities, filename="all_vulnerabilities
     """
     with jsonlines.open(filename, mode='w') as writer:
         for vuln in vulnerabilities:
-            vuln_dict = vuln.__dict__.copy()
-            if hasattr(vuln.span, "__dict__"):
-                vuln_dict["span"] = vuln.span.__dict__
-            writer.write(vuln_dict)
+            writer.write(vuln.dict())
 
 
 def display_stats(vulnerabilities):
@@ -48,17 +45,16 @@ def display_stats(vulnerabilities):
 
 
 def main():
-    clean_processor = CleanVul()
-    clean_processor.process_dataset()  # Processes all CSV files in the configured folder.
-    clean_vulns = clean_processor.get_vulnerabilities()
-    print(f"CleanVul vulnerabilities: {len(clean_vulns)}")
+    # clean_processor = CleanVul()
+    # clean_processor.process_dataset() 
+    # clean_vulns = clean_processor.get_vulnerabilities()
 
     sven_processor = Sven(dataset_split='train')
     sven_processor.process_dataset()
     sven_vulns = sven_processor.get_vulnerabilities()
-    print(f"Sven vulnerabilities: {len(sven_vulns)}")
 
-    all_vulnerabilities = clean_vulns + sven_vulns
+    # all_vulnerabilities = clean_vulns + sven_vulns
+    all_vulnerabilities = sven_vulns
     print(f"Total combined vulnerabilities: {len(all_vulnerabilities)}")
 
     display_stats(all_vulnerabilities)
