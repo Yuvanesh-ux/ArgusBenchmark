@@ -1,16 +1,12 @@
+import os
 import pandas as pd
 from tqdm import tqdm
-import os
-from ..model import Vulnerability, Span
-import anthropic
-import json
 from dotenv import load_dotenv
 
-load_dotenv()
+from ..model import Vulnerability, Span
+import anthropic
 
-api_key = os.environ.get("ANTHROPIC_KEY")
-client = anthropic.Anthropic(api_key=api_key)
-prompt = """
+DEFAULT_PROMPT = """
 You are a security code analysis expert. You have one and only one task:
     Input: You are given a snippet of code that is confirmed to contain a vulnerability.
     Process:
@@ -39,71 +35,155 @@ Remember:
 
 Failure to comply with these rules will cause your output to be parsed incorrectly, so ensure absolute adherence.
 """
-    
-vulnerabilities = []
 
-def processor(path):
-    df = pd.read_csv(path)
+class CleanVul:
+    """
+    A processor for analyzing code snippets for security vulnerabilities
+    using an external API. This class encapsulates reading CSV files, sending
+    vulnerable code to the API, parsing the response, and storing the results.
+    """
 
-    for index, row in tqdm(df.iterrows()):
-        try:
-            row = row.to_dict()
+    def __init__(self, api_key: str = None, prompt: str = None):
+        """
+        Initialize the VulnerabilityProcessor.
+        
+        Args:
+            api_key (str, optional): Anthropics API key. If not provided,
+                it is read from the environment variable 'ANTHROPIC_KEY'.
+            prompt (str, optional): The prompt to send to the API. Uses DEFAULT_PROMPT
+                if not provided.
+        """
+        load_dotenv()  # Load environment variables
 
-            vuln = Vulnerability(
-                code=row["func_before"],
-                cwe=[""],
-                span=Span(start=0, end=1e9),
-                falsePositive=False,
-                language=row["extension"],
-            )
+        self.api_key = api_key or os.environ.get("ANTHROPIC_KEY")
+        if not self.api_key:
+            raise EnvironmentError("ANTHROPIC_KEY not found in environment variables")
 
-            resp = client.messages.create(
-                model="claude-3-7-sonnet-20250219",  
-                system=prompt,  
-                messages=[
-                    {"role": "user", "content": vuln.code}  
-                ],
-                max_tokens=256,  
-                temperature=0,  
-            )
+        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.prompt = prompt or DEFAULT_PROMPT
 
-            response_text = resp.content[0].text
-            lines = response_text.strip().split('\n')
+        # This list will store all processed Vulnerability objects.
+        self.vulnerabilities = []
 
-            cwes = None
-            start = None
-            end = None
+    def parse_api_response(self, response_text: str):
+        """
+        Parse the API response text to extract CWEs, start line, and end line.
 
-            for line in lines:
-                if line.startswith("CWEs:"):
-                    cwes_str = line.split(":")[1].strip()
-                    # Remove the brackets and quotes to get a list of CWEs
-                    cwes = [cwe.strip().replace('"', '') for cwe in cwes_str[1:-1].split(',')]
-                elif line.startswith("start:"):
-                    start = int(line.split(":")[1].strip())
-                elif line.startswith("end:"):
-                    end = int(line.split(":")[1].strip())
+        Args:
+            response_text (str): Raw response text from the API.
+        
+        Returns:
+            tuple: A tuple (cwes, start, end) where:
+                - cwes (list of str): The CWE identifiers.
+                - start (int): The starting line number.
+                - end (int): The ending line number.
+        """
+        cwes, start, end = None, None, None
+        lines = response_text.strip().split('\n')
+        for line in lines:
+            if line.startswith("CWEs:"):
+                # Parse the string inside the brackets into a list.
+                cwes_str = line.split(":", 1)[1].strip()
+                cwes = [cwe.strip().replace('"', '') for cwe in cwes_str[1:-1].split(',')]
+            elif line.startswith("start:"):
+                start = int(line.split(":", 1)[1].strip())
+            elif line.startswith("end:"):
+                end = int(line.split(":", 1)[1].strip())
+        return cwes, start, end
 
-            vuln.cwe = cwes
-            vuln.span = Span(start=start, end=end)
-            # print(vuln.language)
-            vulnerabilities.append(vuln)
-        except Exception as e:
-            print(f"Error validating row {index}: {e}")
-            # print(f"Row data: {row.to_dict()}")
-    
-        break
+    def process_file(self, path: str):
+        """
+        Process a CSV file containing vulnerability code snippets.
+        
+        For each row in the CSV, this method:
+          - Reads the vulnerability information.
+          - Sends the code snippet to the API.
+          - Parses the response to extract vulnerable line numbers and CWE identifiers.
+          - Creates a Vulnerability object and appends it to the processor's list.
+        
+        Note: The current logic processes only the first row per file.
 
-    print(f"Successfully loaded {len(vulnerabilities)} vulnerabilities.")
-    return vulnerabilities
+        Args:
+            path (str): Filepath to the CSV file.
+        
+        Returns:
+            list: A list of Vulnerability objects from the processed file.
+        """
+        df = pd.read_csv(path)
+        local_vulnerabilities = []
 
+        for index, row in tqdm(df.iterrows(), total=len(df), desc=f"Processing {path}"):
+            try:
+                row_dict = row.to_dict()
+                vuln = Vulnerability(
+                    code=row_dict["func_before"],
+                    cwe=[""],
+                    span=Span(start=0, end=int(1e9)),
+                    falsePositive=False,
+                    language=row_dict["extension"],
+                )
+
+                response = self.client.messages.create(
+                    model="claude-3-7-sonnet-20250219",
+                    system=self.prompt,
+                    messages=[{"role": "user", "content": vuln.code}],
+                    max_tokens=256,
+                    temperature=0,
+                )
+                response_text = response.content[0].text
+
+                cwes, start_line, end_line = self.parse_api_response(response_text)
+                vuln.cwe = cwes
+                vuln.span = Span(start=start_line, end=end_line)
+
+                local_vulnerabilities.append(vuln)
+            except Exception as e:
+                print(f"Error processing row {index} in file '{path}': {e}")
+                # Optional: additional error logging can be added here.
+
+            # Process only the first row as per current logic.
+            break
+
+        print(f"Successfully loaded {len(local_vulnerabilities)} vulnerabilities from '{path}'.")
+        # Append local results to the global list
+        self.vulnerabilities.extend(local_vulnerabilities)
+        return local_vulnerabilities
+
+    def process_files(self, file_paths: list):
+        """
+        Process multiple CSV files.
+        
+        Args:
+            file_paths (list): List of file path strings to be processed.
+        """
+        for path in file_paths:
+            self.process_file(path)
+
+    def get_vulnerabilities(self):
+        """
+        Return all processed vulnerabilities.
+        
+        Returns:
+            list: The aggregated list of Vulnerability objects.
+        """
+        return self.vulnerabilities
+
+
+# Example usage:
 if __name__ == "__main__":
-    file_paths = ["src/data/CleanVul/CleanVul_vulnscore_3.csv", "src/data/CleanVul/CleanVul_vulnscore_4.csv"]
-
-    processed_vulnerabilities = []
-    for path in file_paths:
-        processed_vulnerabilities.extend(processor(path))
+    # Define the list of CSV files to be processed.
+    file_paths = [
+        "src/data/CleanVul/CleanVul_vulnscore_3.csv",
+        "src/data/CleanVul/CleanVul_vulnscore_4.csv"
+    ]
     
-    print(processed_vulnerabilities)
-
-
+    # Instantiate the processor.
+    CleanVul = CleanVul()
+    
+    # Process the given files.
+    CleanVul.process_files(file_paths)
+    
+    # Retrieve and print all processed vulnerabilities.
+    processed_vulns = processor.get_vulnerabilities()
+    print("Processed Vulnerabilities:")
+    print(processed_vulns)
