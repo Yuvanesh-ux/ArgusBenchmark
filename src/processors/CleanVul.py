@@ -36,22 +36,26 @@ Remember:
 Failure to comply with these rules will cause your output to be parsed incorrectly, so ensure absolute adherence.
 """
 
+
 class CleanVul:
     """
-    A processor for analyzing code snippets for security vulnerabilities
-    using an external API. This class encapsulates reading CSV files, sending
-    vulnerable code to the API, parsing the response, and storing the results.
+    A processor for analyzing code snippets for vulnerabilities using an external API.
+    
+    This class scans a given folder for CSV files, sends each vulnerability snippet to an API,
+    parses the response, and aggregates the results.
     """
 
-    def __init__(self, api_key: str = None, prompt: str = None):
+    def __init__(self, api_key: str = None, prompt: str = None, data_folder: str = "src/data/CleanVul/"):
         """
         Initialize the VulnerabilityProcessor.
-        
+
         Args:
-            api_key (str, optional): Anthropics API key. If not provided,
-                it is read from the environment variable 'ANTHROPIC_KEY'.
-            prompt (str, optional): The prompt to send to the API. Uses DEFAULT_PROMPT
-                if not provided.
+            api_key (str, optional): Anthropics API key. If not provided, it is read
+                from the environment variable 'ANTHROPIC_KEY'.
+            prompt (str, optional): The prompt that will be sent to the API. If not provided,
+                the DEFAULT_PROMPT is used.
+            data_folder (str, optional): Folder containing CSV files with vulnerability data.
+                Defaults to "data/CleanVul".
         """
         load_dotenv()  # Load environment variables
 
@@ -61,9 +65,26 @@ class CleanVul:
 
         self.client = anthropic.Anthropic(api_key=self.api_key)
         self.prompt = prompt or DEFAULT_PROMPT
-
-        # This list will store all processed Vulnerability objects.
+        self.data_folder = data_folder
+        self.file_paths = self._get_file_paths()
         self.vulnerabilities = []
+
+    def _get_file_paths(self):
+        """
+        Scans the data folder and returns a list of CSV file paths.
+
+        Returns:
+            list: List of full file paths for CSV files in the data folder.
+        """
+        if not os.path.isdir(self.data_folder):
+            raise FileNotFoundError(f"Directory '{self.data_folder}' does not exist.")
+
+        paths = []
+        for filename in os.listdir(self.data_folder):
+            if filename.endswith(".csv"):
+                full_path = os.path.join(self.data_folder, filename)
+                paths.append(full_path)
+        return paths
 
     def parse_api_response(self, response_text: str):
         """
@@ -71,18 +92,15 @@ class CleanVul:
 
         Args:
             response_text (str): Raw response text from the API.
-        
+
         Returns:
-            tuple: A tuple (cwes, start, end) where:
-                - cwes (list of str): The CWE identifiers.
-                - start (int): The starting line number.
-                - end (int): The ending line number.
+            tuple: (cwes (list of str), start (int), end (int))
         """
         cwes, start, end = None, None, None
         lines = response_text.strip().split('\n')
         for line in lines:
             if line.startswith("CWEs:"):
-                # Parse the string inside the brackets into a list.
+                # Extract the string inside the brackets and parse into a list.
                 cwes_str = line.split(":", 1)[1].strip()
                 cwes = [cwe.strip().replace('"', '') for cwe in cwes_str[1:-1].split(',')]
             elif line.startswith("start:"):
@@ -100,12 +118,12 @@ class CleanVul:
           - Sends the code snippet to the API.
           - Parses the response to extract vulnerable line numbers and CWE identifiers.
           - Creates a Vulnerability object and appends it to the processor's list.
-        
-        Note: The current logic processes only the first row per file.
+
+        Note: The current logic processes only the first row of each file.
 
         Args:
-            path (str): Filepath to the CSV file.
-        
+            path (str): File path to the CSV file.
+
         Returns:
             list: A list of Vulnerability objects from the processed file.
         """
@@ -139,51 +157,39 @@ class CleanVul:
                 local_vulnerabilities.append(vuln)
             except Exception as e:
                 print(f"Error processing row {index} in file '{path}': {e}")
-                # Optional: additional error logging can be added here.
+                # Optional: add logging or further error handling here.
 
-            # Process only the first row as per current logic.
-            break
 
         print(f"Successfully loaded {len(local_vulnerabilities)} vulnerabilities from '{path}'.")
-        # Append local results to the global list
         self.vulnerabilities.extend(local_vulnerabilities)
         return local_vulnerabilities
 
-    def process_files(self, file_paths: list):
+    def process_all_files(self):
         """
-        Process multiple CSV files.
-        
-        Args:
-            file_paths (list): List of file path strings to be processed.
+        Process all CSV files found in the data folder.
         """
-        for path in file_paths:
+        for path in self.file_paths:
             self.process_file(path)
 
     def get_vulnerabilities(self):
         """
-        Return all processed vulnerabilities.
-        
+        Retrieve all processed vulnerabilities.
+
         Returns:
-            list: The aggregated list of Vulnerability objects.
+            list: Aggregated list of Vulnerability objects.
         """
         return self.vulnerabilities
 
 
 # Example usage:
 if __name__ == "__main__":
-    # Define the list of CSV files to be processed.
-    file_paths = [
-        "src/data/CleanVul/CleanVul_vulnscore_3.csv",
-        "src/data/CleanVul/CleanVul_vulnscore_4.csv"
-    ]
-    
-    # Instantiate the processor.
+    # Instantiate the processor with the data folder that contains your CSV files.
     CleanVul = CleanVul()
     
-    # Process the given files.
-    CleanVul.process_files(file_paths)
+    # Process all CSV files in the folder.
+    CleanVul.process_all_files()
     
     # Retrieve and print all processed vulnerabilities.
-    processed_vulns = processor.get_vulnerabilities()
+    processed_vulns = CleanVul.get_vulnerabilities()
     print("Processed Vulnerabilities:")
     print(processed_vulns)
