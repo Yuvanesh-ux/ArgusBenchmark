@@ -45,16 +45,16 @@ def display_stats(vulnerabilities):
 
 
 def main():
-    # clean_processor = CleanVul()
-    # clean_processor.process_dataset() 
-    # clean_vulns = clean_processor.get_vulnerabilities()
+    clean_processor = CleanVul()
+    clean_processor.process_dataset() 
+    clean_vulns = clean_processor.get_vulnerabilities()
 
     sven_processor = Sven(dataset_split='train')
     sven_processor.process_dataset()
     sven_vulns = sven_processor.get_vulnerabilities()
 
-    # all_vulnerabilities = clean_vulns + sven_vulns
-    all_vulnerabilities = sven_vulns
+    all_vulnerabilities = clean_vulns + sven_vulns
+    # all_vulnerabilities = sven_vulns
     print(f"Total combined vulnerabilities: {len(all_vulnerabilities)}")
 
     display_stats(all_vulnerabilities)
