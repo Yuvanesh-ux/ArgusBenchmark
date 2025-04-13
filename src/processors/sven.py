@@ -6,7 +6,6 @@ import anthropic
 
 from ..model import Vulnerability, Span
 
-# Prompt used when no deleted lines exist.
 DEFAULT_PROMPT = """
 You are a security code analysis expert. Your task is to examine the following code snippet and determine the precise starting and ending line numbers that contain the vulnerability.
 Output your answer exactly as follows:
@@ -65,12 +64,10 @@ class Sven:
         self.dataset_file = os.path.join(self.base_path, self.splits[self.dataset_split])
         self.vulnerabilities = []
         
-        # Load API key either from parameter or environment variable
         self.api_key = api_key or os.environ.get("ANTHROPIC_KEY")
         if not self.api_key:
             raise EnvironmentError("ANTHROPIC_KEY not found in environment variables")
         
-        # Initialize Anthropics client
         self.client = anthropic.Anthropic(api_key=self.api_key)
 
     def parse_span_response(self, response_text: str):
@@ -140,7 +137,6 @@ class Sven:
                     end=deleted_lines[-1]["line_no"]
                 )
 
-            # Identify language from file name
             file_name = row["file_name"]
             if file_name.endswith(".py"):
                 language = "py"
@@ -151,7 +147,6 @@ class Sven:
             else:
                 language = "unknown"
 
-            # Create the primary Vulnerability object
             vuln = Vulnerability(
                 code=code_before,
                 cwe=cwe,
@@ -161,7 +156,6 @@ class Sven:
             )
 
             try:
-                # Create a false-positive Vulnerability object
                 added_lines = row["line_changes"]["added"]
                 if len(added_lines) == 1:
                     line_no = added_lines[0]["line_no"]
